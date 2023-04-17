@@ -97,9 +97,15 @@ Java_com_vell_vins_VinsUtils_getLatestEulerAngles(JNIEnv *env, jclass type) {
     Eigen::Matrix3f RIC = Utility::ypr2R(Vector3d(0.0f, 90.0f, 0.0f)).cast<float>();
     rot = rot * RIC;
     Vector3d angles = Utility::R2ypr(rot.cast<double>());
-    jfloat retJ[3] = {
-            angles(0), angles(1), angles(2)
-    };
+//    jfloat retJ[3] = {
+//            angles(0), angles(1), angles(2)
+//    };
+
+    jfloat retJ[3];
+    retJ[0] = angles(0);
+    retJ[1] = angles(1);
+    retJ[2] = angles(2);
+
     jfloatArray ret = env->NewFloatArray(3);
     env->SetFloatArrayRegion(ret, 0, 3, retJ);
     return ret;

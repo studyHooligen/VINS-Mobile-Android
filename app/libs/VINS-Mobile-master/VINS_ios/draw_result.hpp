@@ -18,6 +18,8 @@
 #include "global_param.hpp"
 #include "delaunay.h"
 
+#include <opencv2/imgproc/types_c.h>
+
 using namespace cv;
 using namespace Eigen;
 using namespace std;
