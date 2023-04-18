@@ -763,6 +763,9 @@ void ViewController::globalPoseGraphLoop() {
     }
 }
 
+/*
+ * 停止更新EventQueue中的 IMU的数据
+ */
 void ViewController::imuStopUpdate() {
 
     ASensorManager *sensorManager = ASensorManager_getInstance();
@@ -776,8 +779,12 @@ void ViewController::imuStopUpdate() {
     ASensorEventQueue_disableSensor(gyroscopeEventQueue, gyroscope);
 }
 
+/*
+ * 启动更新EventQueue中的 IMU的数据
+ */
 void ViewController::imuStartUpdate() {
 
+    // 获取 Android 传感器实例
     ASensorManager *sensorManager = ASensorManager_getInstance();
     assert(sensorManager != NULL);
 
@@ -786,6 +793,7 @@ void ViewController::imuStartUpdate() {
         looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
     assert(looper != NULL);
 
+    // 初始化 加速度计 测量结果的事件队列
     accelerometerEventQueue = ASensorManager_createEventQueue(sensorManager, looper,
                                                               LOOPER_ID_USER, NULL,
                                                               NULL);
@@ -801,6 +809,7 @@ void ViewController::imuStartUpdate() {
                                             SENSOR_REFRESH_PERIOD_US);
     assert(status >= 0);
 
+    // 初始化 加速度计 测量结果的事件队列
     gyroscopeEventQueue = ASensorManager_createEventQueue(sensorManager, looper,
                                                           LOOPER_ID_USER, process_imu_sensor_events,
                                                           NULL);
@@ -819,22 +828,28 @@ void ViewController::imuStartUpdate() {
     LOGI("IMU EventQueues initialized and started");
 }
 
+/*
+ * 功能：处理IMU的输出事件
+ * 本质上是获取数据和解析格式
+ */
 int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
     static ASensorEvent acclEvent;
     static double acclEventTimestamp = -1.0;
     ASensorEvent gyroEvent;
 
+    // 从 传感器事件存储队列 中读取事件，实现读取传感器
+    // 先读取陀螺仪数据
     while (ASensorEventQueue_getEvents(gyroscopeEventQueue, &gyroEvent, 1) > 0) {
-        assert(gyroEvent.type == ASENSOR_TYPE_GYROSCOPE);
+        assert(gyroEvent.type == ASENSOR_TYPE_GYROSCOPE);   // 校验类型
 
-
-        double timeStampGyro = timeStampToSec(gyroEvent.timestamp);
+        double timeStampGyro = timeStampToSec(gyroEvent.timestamp); // 时间戳
 //        LOGI("IMU gyro event timeStamp: %lf", timeStampGyro);
         //The timestamp is the amount of time in seconds since the device booted.
-        assert(timeStampGyro > 0);
+        assert(timeStampGyro > 0);  //有效性校验
 
         IMU_MSG gyro_msg;
         gyro_msg.header = timeStampGyro;
+        // 提取解析 陀螺仪 数据
         // in iOS and in Android the unit is rad/s
         gyro_msg.gyr << gyroEvent.uncalibrated_gyro.x_uncalib, //latestGyro.rotationRate.x,
                 gyroEvent.uncalibrated_gyro.y_uncalib, //latestGyro.rotationRate.y,
@@ -859,19 +874,24 @@ int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
             continue;
         }
 
+        // 读取完陀螺仪的数据，这里 再读取加速度计数据
         while (acclEventTimestamp < instance->gyro_buf[0].header) {
 //            LOGI("acclEventTimestamp < gyroEvent.timestamp: %lf < %lf", acclEventTimestamp , instance->gyro_buf[0].header);
             ssize_t numEvents;
+
+            // 获取最新的加速度数据（非阻塞式等待）
             while ((numEvents = ASensorEventQueue_getEvents(accelerometerEventQueue, &acclEvent,
                                                             1)) == 0) {
 //                LOGI("having to wait for accl event");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            assert(numEvents == 1);
-            assert(acclEvent.type == ASENSOR_TYPE_ACCELEROMETER);
+            assert(numEvents == 1); // TODO 这个感觉有问题啊?
+            assert(acclEvent.type == ASENSOR_TYPE_ACCELEROMETER);   // TODO 可以优化掉
 
+            // 时间戳转换
             acclEventTimestamp = timeStampToSec(acclEvent.timestamp);
 
+            // 加速度
 //            LOGI("IMU accl event timeStamp: %lf", timeStampAccl);
             shared_ptr<IMU_MSG> acc_msg(new IMU_MSG());
             acc_msg->header = acclEventTimestamp;
@@ -882,6 +902,8 @@ int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
                     acclEvent.acceleration.z;
             instance->cur_acc = acc_msg;
         }
+
+
 //        LOGI("waited for accl event: %lf >= %lf", acclEventTimestamp, instance->gyro_buf[0].header);
         if (instance->gyro_buf[1].header < acclEventTimestamp) {
             LOGE("having to wait for fitting gyro event"); // This should not happen if the frequency is the same
@@ -897,6 +919,8 @@ int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
             imu_msg->header = instance->cur_acc->header;
 //            imu_msg->header = (double)cv::getTickCount() / cv::getTickFrequency();
             imu_msg->acc = instance->cur_acc->acc;
+
+            // 这里陀螺仪的数据 做了线性内插 来对齐时间不同步问题减小误差
             imu_msg->gyr = instance->gyro_buf[0].gyr +
                            (instance->gyro_buf[1].gyr - instance->gyro_buf[0].gyr) *
                            (instance->cur_acc->header - instance->gyro_buf[0].header) /
@@ -1225,13 +1249,18 @@ void ViewController::recv_imu(const ImuConstPtr &imu_msg) {
         imu_msg_local.acc = imu_msg->acc;
         imu_msg_local.gyr = imu_msg->gyr;
 
-        instance->m_imu_feedback.lock();
+
+        // 存储IMU数据到 队列缓冲区
+        instance->m_imu_feedback.lock();    // 互斥量保护
         instance->local_imu_msg_buf.push(imu_msg_local);
         instance->m_imu_feedback.unlock();
     }
+
+    // 存储IMU数据到 队列缓冲区
     instance->m_buf.lock();
     instance->imu_msg_buf.push(imu_msg);
     //__android_log_print(ANDROID_LOG_INFO, APPNAME, "IMU_buf timestamp %lf, acc_x = %lf",imu_msg_buf.front()->header,imu_msg_buf.front()->acc.x());
     instance->m_buf.unlock();
+
     instance->con.notify_one();
 }

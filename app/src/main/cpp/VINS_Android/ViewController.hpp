@@ -71,6 +71,8 @@ extern "C" {
 
 //- (void)setVisibleAnimated:(BOOL)visible;
 
+
+// IMU 数据结构 6轴（加速度计 + 陀螺仪）
 struct IMU_MSG {
     NSTimeInterval header;
     Vector3d acc;
