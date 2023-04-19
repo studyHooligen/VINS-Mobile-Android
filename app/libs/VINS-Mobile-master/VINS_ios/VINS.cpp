@@ -335,6 +335,8 @@ void VINS::update_loop_correction() {
 
 void
 VINS::processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity) {
+
+    // 第一组数据 初始化
     if (!first_imu) {
         first_imu = true;
         acc_0 = linear_acceleration;
@@ -378,6 +380,8 @@ VINS::processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d 
 void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_num) {
     int track_num;
     printf("adding feature points %lu\n", image_msg.size());
+
+    // 检测当前帧是否有足够的视差（相比前一帧）
     if (f_manager.addFeatureCheckParallax(frame_count, image_msg, track_num))
         marginalization_flag = MARGIN_OLD;
     else

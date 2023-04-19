@@ -77,6 +77,9 @@ void ViewController::viewDidLoad() {
 //        [self.view addSubview:indicator];
 
     /****************************************Init all the thread****************************************/
+    /*
+     * 初始化 所有相关的 线程
+     */
 //        _condition=[[NSCondition alloc] init];
     mainLoop = std::thread(&ViewController::run, this);
     // TODO: move further down
@@ -90,11 +93,13 @@ void ViewController::viewDidLoad() {
 
     if (LOOP_CLOSURE) {
         //loop closure thread
+        // 回环 线程
         loop_thread = std::thread(&ViewController::loopDetectionLoop, this); /*
             loop_thread = [[NSThread alloc]initWithTarget:self selector:@selector(loop_thread) object:nil];
             [loop_thread setName:@"loop_thread"];
             [loop_thread start];*/
 
+        // 全局图优化 线程
         globalLoopThread = std::thread(&ViewController::globalPoseGraphLoop, this); /*
             globalLoopThread=[[NSThread alloc]initWithTarget:self selector:@selector(globalLoopThread) object:nil];
             [globalLoopThread setName:@"globalLoopThread"];
@@ -127,6 +132,9 @@ void ViewController::viewDidLoad() {
         // TODO: init ASensorManager motionManager = [[CMMotionManager alloc] init];
         frameSize = cv::Size(videoWidth,
                              videoHeight); // frameSize = cv::Size(videoCamera.imageWidth, videoCamera.imageHeight);
+
+        imuStartUpdate();   // 启动IMU
+
         LOGI("Init successful");
     } else {
         LOGE("Init failed due to unsupported Device or OS Version");
@@ -138,21 +146,28 @@ void ViewController::processImage(cv::Mat &image, double timeStamp, bool isScree
     TS(ViewController_processImage);
 
     if (isCapturing) {
+
+        // 图像特征信息 对象
         shared_ptr<IMG_MSG> img_msg(new IMG_MSG());
+        // TODO：下面重覆盖了啊？这边是不是可以直接删掉
         img_msg->header = systemUptime();//[[NSProcessInfo processInfo] systemUptime];
+
+        // 检查IMU的有效性
         if (lateast_imu_time <= 0) {
             LOGI("IMU Timestamp negative: %lf, abort processImage()", lateast_imu_time);
             if (isScreenRotated)
                 cv::rotate(image, image, cv::ROTATE_180);
             return;
         }
+
+        // 打印时间戳
         img_msg->header = timeStamp;
         LOGI("image timeStamp%lf", timeStamp);
         // if this is the case the feature-tracker wont work because the mask is cols x rows 480x640
         bool isNeedRotation = image.size() != frameSize;
         assert(!isNeedRotation);
 
-        //for save data
+        //for save data，缓存输入图像
         cv::Mat input_frame;
         input_frame = image;
         if (!imgDataBuf.empty()) {
@@ -160,16 +175,22 @@ void ViewController::processImage(cv::Mat &image, double timeStamp, bool isScree
             return;
         }
 
+        // 转灰度图
         cv::Mat gray;
         cv::cvtColor(input_frame, gray, CV_RGBA2GRAY);
+
         cv::Mat img_with_feature;
-        cv::Mat img_equa;
+        cv::Mat img_equa;   // 白平衡后的灰度图
+
+        // 自适应均衡化图像
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
         clahe->setClipLimit(3);
         clahe->apply(gray, img_equa);
+
+
         TS(time_feature);
 
-
+        // 数据放入featuretracker
         m_depth_feedback.lock();
         featuretracker.solved_features = solved_features;
         featuretracker.solved_vins = solved_vins;
@@ -179,6 +200,7 @@ void ViewController::processImage(cv::Mat &image, double timeStamp, bool isScree
         featuretracker.imu_msgs = getImuMeasurements(img_msg->header);
         m_imu_feedback.unlock();
 
+        // 获取检测特征的结果
         vector<Point2f> good_pts;
         vector<double> track_len;
         bool vins_normal = (vins.solver_flag == VINS::NON_LINEAR);
@@ -377,30 +399,42 @@ std::vector<std::pair<std::vector<ImuConstPtr>, ImgConstPtr>> ViewController::ge
         if (imu_msg_buf.empty() || img_msg_buf.empty())
             return measurements;
 
+        // 检测最新的 IMU数据 时间是否在 待处理图像采样后
         if (!(imu_msg_buf.back()->header > img_msg_buf.front()->header)) {
             __android_log_print(ANDROID_LOG_INFO, "VINS",
                                 "wait for imu, only should happen at the beginning");
+            __android_log_print(ANDROID_LOG_INFO, "VINS",
+                                "imu back header:%lf, img front header:%lf.",
+                                imu_msg_buf.back()->header, img_msg_buf.front()->header);
             return measurements;
         }
 
+        // 要处理的IMU数据 采样时间 必须略早于 图片采样时间 之前
+        // 否则丢弃 多采样的图片
         if (!(imu_msg_buf.front()->header < img_msg_buf.front()->header)) {
             __android_log_print(ANDROID_LOG_INFO, "VINS",
                                 "throw img, only should happen at the beginning");
             img_msg_buf.pop();
             continue;
         }
-        ImgConstPtr img_msg = img_msg_buf.front(); // auto img_msg = img_msg_buf.front();
 
+        // 取出要处理的图片
+        ImgConstPtr img_msg = img_msg_buf.front(); // auto img_msg = img_msg_buf.front();
         img_msg_buf.pop();
 
+        // 取出 对应处理图片 采样时间之前的 所有IMU采样数据
         std::vector<ImuConstPtr> IMUs;
         while (imu_msg_buf.front()->header <= img_msg->header) {
             IMUs.emplace_back(imu_msg_buf.front());
             imu_msg_buf.pop();
         }
         //__android_log_print(ANDROID_LOG_INFO, APPNAME, "IMU_buf = %d",IMUs.size());
+
+        // 转载每一组 IMU数据 和对应的 图片
         measurements.emplace_back(IMUs, img_msg);
     }
+
+    // 返回组合好的 测量数据
     return measurements;
 }
 
@@ -450,6 +484,9 @@ void ViewController::send_imu(const ImuConstPtr &imu_msg) {
     vins.processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz));
 }
 
+/*
+ * 主线程 入口，在 viewDidLoad 中启动
+ */
 void ViewController::run() {
 //-(void)run{
     _condition.lock(); //[_condition lock];
@@ -476,14 +513,20 @@ void ViewController::process() {
 //                return (measurements = getMeasurements()).size() != 0;
     });
     lk.unlock();
+
     waiting_lists = measurements.size();
+
+    // 依次处理每一组 图片 和对应的 IMU数据
     for (auto &measurement : measurements) {
         TS(IMU_Data);
+
+        // 处理IMU数据 （预积分）
         for (auto &imu_msg : measurement.first) {
             send_imu(imu_msg);
         }
         TE(IMU_Data);
 
+        // 处理 图片
         auto img_msg = measurement.second;
         map<int, Vector3d> image = img_msg->point_clouds;
         //__android_log_print(ANDROID_LOG_INFO, APPNAME, "Image timestamp = %lf",img_msg->header);
@@ -784,14 +827,20 @@ void ViewController::imuStopUpdate() {
  */
 void ViewController::imuStartUpdate() {
 
+    LOGI("begin start imu update init func. wait~~~~~");
+
     // 获取 Android 传感器实例
     ASensorManager *sensorManager = ASensorManager_getInstance();
     assert(sensorManager != NULL);
+
+    LOGI("get Asensor Manager Success.");
 
     ALooper *looper = ALooper_forThread();
     if (looper == NULL)
         looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
     assert(looper != NULL);
+
+    LOGI("get ALooper Success.");
 
     // 初始化 加速度计 测量结果的事件队列
     accelerometerEventQueue = ASensorManager_createEventQueue(sensorManager, looper,
@@ -840,9 +889,15 @@ int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
     // 从 传感器事件存储队列 中读取事件，实现读取传感器
     // 先读取陀螺仪数据
     while (ASensorEventQueue_getEvents(gyroscopeEventQueue, &gyroEvent, 1) > 0) {
+
+//        LOGI("deal gyro Event.");
+
         assert(gyroEvent.type == ASENSOR_TYPE_GYROSCOPE);   // 校验类型
 
         double timeStampGyro = timeStampToSec(gyroEvent.timestamp); // 时间戳
+
+//        LOGI("timestamp is %f",timeStampGyro);
+
 //        LOGI("IMU gyro event timeStamp: %lf", timeStampGyro);
         //The timestamp is the amount of time in seconds since the device booted.
         assert(timeStampGyro > 0);  //有效性校验
@@ -943,6 +998,9 @@ int ViewController::process_imu_sensor_events(int fd, int events, void *data) {
     return 1;
 }
 
+/*
+ * 存储数据 线程入口，在 viewDidLoad 中调用
+ */
 void ViewController::saveDataLoop() {
 //-(void)saveData{
     while (!saveData_isCancelled) // while (![[NSThread currentThread] isCancelled])

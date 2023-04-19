@@ -25,11 +25,15 @@ Java_com_thkoeln_jmoeller_vins_1mobile_1androidport_VinsJNI_init(JNIEnv *env, jo
     viewControllerGlobal = std::unique_ptr<ViewController>(new ViewController);
     LOGI("Successfully created Viewcontroller Object");
 
+    // 屁事不干，就打印一句话
     viewControllerGlobal->testMethod();
 
     // startup method of ViewController
     viewControllerGlobal->viewDidLoad();
-    viewControllerGlobal->imuStartUpdate();
+
+    // 艹，放在这里根本就不会调用，日尼玛
+//    viewControllerGlobal->imuStartUpdate();
+
 }
 
 extern "C"

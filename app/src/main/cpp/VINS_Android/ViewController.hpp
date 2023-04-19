@@ -423,9 +423,9 @@ public:
     void processImage(cv::Mat &image, double timeStamp, bool isScreenRotated);
 
 
-/*
- Send imu data and visual data into VINS
- */
+    /*
+     Send imu data and visual data into VINS
+     */
     std::vector<std::pair<std::vector<ImuConstPtr>, ImgConstPtr>> getMeasurements();
 
 

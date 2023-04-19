@@ -74,7 +74,7 @@ public:
     vector<int> ids,track_cnt;
     vector<max_min_pts> parallax_cnt;
     static int n_id;
-    int img_cnt;
+    int img_cnt;        // 处理图片累计，判断是否初始化detect feature
     double current_time;
     vinsPnP vins_pnp;
     bool use_pnp;

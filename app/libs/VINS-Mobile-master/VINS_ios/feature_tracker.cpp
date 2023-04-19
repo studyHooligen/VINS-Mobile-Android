@@ -8,7 +8,10 @@
 
 #include "feature_tracker.hpp"
 
+// 全局变量
 int FeatureTracker::n_id = 0;
+
+// 对象初始化，除了打印，屁事不干
 FeatureTracker::FeatureTracker()
 :mask(ROW, COL, CV_8UC1),update_finished{false},img_cnt{0},current_time{-1.0},use_pnp{false}
 {
@@ -16,6 +19,8 @@ FeatureTracker::FeatureTracker()
     assert(mask.size().width == COL);
     assert(mask.size().height == ROW);
 }
+
+
 /*********************************************************tools function for feature tracker start*****************************************************/
 bool inBorder(const cv::Point2f &pt)
 {
@@ -264,8 +269,11 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                 //goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.10, MIN_DIST, mask, 3, false, 0.04);
                 assert(mask.size().height == forw_img.size().height);
                 assert(mask.size().width == forw_img.size().width);
-//                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST);
-                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST, mask);
+
+                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST);
+
+                // 找图像中 特征点非常强的角点
+//                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST, mask);
                 TE(time_goodfeature);
             }
             else
@@ -312,6 +320,8 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
     //finished and tell solver the data is ok
     update_finished = true;
 }
+
+
 bool FeatureTracker::updateID(unsigned int i)
 {
     if (i < ids.size())
